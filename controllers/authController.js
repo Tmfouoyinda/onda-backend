@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 
 const sendCode = async (req, res) => {
 
+    
     const {phone_number} = req.body;
     
     const code = crypto.randomInt(100000, 1000000).toString();
