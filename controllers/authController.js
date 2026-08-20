@@ -61,12 +61,21 @@ const sendCode = async (req, res) => {
         });
     }
 
-    console.log(`Verification code for ${phone_number}: ${code}`);
+   if (
+    process.env.NODE_ENV === "development" &&
+    process.env.DEV_OTP_SECRET
+    ) {
+        return res.status(200).json({
+            status: "success",
+            message: "Code generated",
+            devCode: code,
+        });
+    }
 
     res.json({
         status: "success",
         message: "Code sent successfully"
-    });
+    })
 }
 
 
