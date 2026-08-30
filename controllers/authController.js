@@ -1,45 +1,62 @@
 //AuthControllers
 const {sequelize, verification_code, user, refresh_token } = require('../models');
+const { Vonage } = require('@vonage/server-sdk');
+const { Auth } = require('@vonage/auth');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { jwtSecret } = require('../config/env');
 const jwt = require('jsonwebtoken');
+const { authMiddleware } = require('../middlewares/authMiddleware');
 
 const sendCode = async (req, res) => {
+    const { phone_number } = req.body;
 
-    
-    const {phone_number} = req.body;
-    
-    const code = crypto.randomInt(100000, 1000000).toString();
-    const code_hash = crypto.createHash('sha256').update(code).digest('hex');
-    const expires_at = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes from now
-
-    const [{ lock_status }] = await sequelize.query('SELECT GET_LOCK(?, ?) AS lock_status;', {
-        replacements: [`lock_${phone_number}`, 10],
-        type: sequelize.QueryTypes.SELECT
-    });
-
-    // lock_status is null on error, 0 on timeout, 1 on success
-    if (lock_status !== 1) {
-        return res.status(429).json({
-            status: "error",
-            message: "A code was already requested for this number, please try again shortly"
+    if (!phone_number) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Phone number is required'
         });
     }
 
+    const normalizedPhone = phone_number.startsWith('+')
+        ? phone_number
+        : `+${phone_number.replace(/\D/g, '')}`;
+
+    const code = crypto.randomInt(100000, 1000000).toString();
+    const code_hash = crypto.createHash('sha256').update(code).digest('hex');
+    const expires_at = new Date(Date.now() + 5 * 60 * 1000);
+
+    const [{ lock_status }] = await sequelize.query('SELECT GET_LOCK(?, ?) AS lock_status;', {
+        replacements: [`lock_${normalizedPhone}`, 10],
+        type: sequelize.QueryTypes.SELECT
+    });
+
+    if (lock_status !== 1) {
+        return res.status(429).json({
+            status: 'error',
+            message: 'A code was already requested for this number, please try again shortly'
+        });
+    }
+
+    const vonage = new Vonage(new Auth({
+        apiKey: process.env.VONAGE_API_KEY,
+        apiSecret: process.env.VONAGE_API_SECRET,
+    }));
+
     const transaction = await sequelize.transaction();
+    let releaseLock = true;
 
     try {
-        await verification_code.update({consumed_at: new Date()}, {
+        await verification_code.update({ consumed_at: new Date() }, {
             where: {
-                phone_number: phone_number,
+                phone_number: normalizedPhone,
                 consumed_at: null
             },
             transaction
         });
 
         await verification_code.create({
-            phone_number: phone_number,
+            phone_number: normalizedPhone,
             code_hash: code_hash,
             expires_at: expires_at,
             consumed_at: null,
@@ -48,34 +65,39 @@ const sendCode = async (req, res) => {
 
         await transaction.commit();
     } catch (error) {
+        releaseLock = false;
         await transaction.rollback();
+
         return res.status(500).json({
-            status: "error",
-            message: "Failed to send code"
+            status: 'error',
+            message: 'Failed to send code'
         });
     } finally {
-        // always release, even if the transaction failed, otherwise the lock stays held until the connection closes
-        await sequelize.query('SELECT RELEASE_LOCK(?);', {
-            replacements: [`lock_${phone_number}`],
-            type: sequelize.QueryTypes.SELECT
-        });
+        if (releaseLock) {
+            await sequelize.query('SELECT RELEASE_LOCK(?);', {
+                replacements: [`lock_${normalizedPhone}`],
+                type: sequelize.QueryTypes.SELECT
+            });
+        }
     }
 
-   if (
-    process.env.NODE_ENV === "development" &&
-    process.env.DEV_OTP_SECRET
-    ) {
-        return res.status(200).json({
-            status: "success",
-            message: "Code generated",
-            devCode: code,
+    try {
+        const result = await vonage.sms.send({
+            to: normalizedPhone,
+            from: process.env.VONAGE_SMS_FROM || 'Vonage APIs',
+            text: `Votre code de vérification Onda est : ${code}`
         });
+        console.log('Vonage response:', JSON.stringify(result, null, 2));
+    } catch (error) {
+        console.error('Failed to send verification SMS:', JSON.stringify(error.response || error, null, 2));
     }
 
-    res.json({
-        status: "success",
-        message: "Code sent successfully"
-    })
+    console.log(`Verification code for ${normalizedPhone}: ${code}`);
+
+    return res.json({
+        status: 'success',
+        message: 'Code sent successfully'
+    });
 }
 
 
@@ -190,9 +212,86 @@ const refreshToken = async (req, res) => {
     });
 };
 
+
+const me = async (req, res) => {
+
+    const userId = req.user.id;
+
+    const userRecord = await user.findByPk(userId);
+
+    if (!userRecord) {
+        return res.status(404).json({
+            status: "error",
+            message: "User not found"
+        });
+    }
+
+    res.json({
+        status: "success",
+        data: {
+            id: userRecord.id,
+            phone_number: userRecord.phone_number,
+            display_name: userRecord.display_name,
+            created_at: userRecord.created_at,
+            updated_at: userRecord.updated_at,
+            username: userRecord.username,
+            avatar_url: userRecord.avatar_url
+        }
+    });
+
+
+}
+
+
+const updateProfile = async (req, res) => {
+    const userId = req.user.id;
+    const { username, avatar_url, bio, display_name } = req.body;
+
+    const userRecord = await user.findByPk(userId);
+
+    if (!userRecord) {
+        return res.status(404).json({
+            status: "error",
+            message: "User not found"
+        });
+    }
+
+    try {
+        userRecord.avatar_url = avatar_url || userRecord.avatar_url;
+        userRecord.username = username || userRecord.username;
+        userRecord.display_name = display_name || userRecord.display_name
+        userRecord.bio = bio || userRecord.bio;
+
+        await userRecord.save();
+
+        res.json({
+            status: "success",
+            message: "Profile updated successfully",
+        });
+       
+    } catch (error) {
+
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            return res.status(409).json({
+                status: "error",
+                message: error.errors.map(e => e.message).join(', ')
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            message: "Failed to update profile"
+        });
+    }
+
+    
+}
+
 module.exports = {
     sendCode,
     verifyCode,
     logout,
-    refreshToken
+    refreshToken,
+    me,
+    updateProfile
 }
