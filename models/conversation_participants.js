@@ -68,5 +68,11 @@ module.exports = (sequelize, DataTypes) => {
         ]
     });
 
+    conversation_participant.associate = (models) => {
+        conversation_participant.belongsTo(models.conversation, {
+            foreignKey: 'conversation_id',
+        });
+    };
+
     return conversation_participant;
 };

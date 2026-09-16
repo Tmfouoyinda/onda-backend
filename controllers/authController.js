@@ -87,7 +87,6 @@ const sendCode = async (req, res) => {
             from: process.env.VONAGE_SMS_FROM || 'Vonage APIs',
             text: `Votre code de vérification Onda est : ${code}`
         });
-        console.log('Vonage response:', JSON.stringify(result, null, 2));
     } catch (error) {
         console.error('Failed to send verification SMS:', JSON.stringify(error.response || error, null, 2));
     }

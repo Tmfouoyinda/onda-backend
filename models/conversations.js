@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
 
         public_id: {
             type: DataTypes.UUID,
+            defaultValue: DataTypes.UUIDV4,
             allowNull: false,
             unique: true
         },
@@ -48,5 +49,12 @@ module.exports = (sequelize, DataTypes) => {
     }, {
         underscored: true,
     });
+
+    conversation.associate = (models) => {
+        conversation.hasMany(models.conversation_participant, {
+            foreignKey: 'conversation_id',
+        });
+    };
+
     return conversation;
 };
