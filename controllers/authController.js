@@ -10,7 +10,7 @@ const { authMiddleware } = require('../middlewares/authMiddleware');
 
 const sendCode = async (req, res) => {
     const { phone_number } = req.body;
-
+    
     if (!phone_number) {
         return res.status(400).json({
             status: 'error',
