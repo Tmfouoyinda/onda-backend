@@ -57,7 +57,8 @@ const createConversation = async (req, res) => {
                 attributes: [],
             }],
             group: ['conversation.id'],
-            having: sequelize.where(sequelize.fn('COUNT', sequelize.col('conversation_participant.user_id')), 2)
+            having: sequelize.where(sequelize.fn('COUNT', sequelize.col('conversation_participants.user_id')), 2),
+            subQuery: false
         });
 
         if (existingConversation) {
