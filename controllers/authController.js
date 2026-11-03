@@ -17,7 +17,7 @@ const sendCode = async (req, res) => {
             message: 'Phone number is required'
         });
     }
-
+    
     const normalizedPhone = phone_number.startsWith('+')
         ? phone_number
         : `+${phone_number.replace(/\D/g, '')}`;
@@ -104,8 +104,6 @@ const sendCode = async (req, res) => {
         } catch (error) {
             console.error('Failed to send verification SMS:', JSON.stringify(error.response || error, null, 2));
         }
-
-        console.log(`Verification code for ${normalizedPhone}: ${code}`);
 
         return res.json({
             status: 'success',
